@@ -9,7 +9,9 @@ declare namespace Cloudflare {
 		DB: D1Database;
 	}
 }
-interface Env extends Cloudflare.Env {}
+interface Env extends Cloudflare.Env {
+    PAGESPEED_INSIGHTS_API: string;
+}
 
 // Begin runtime types
 /*! *****************************************************************************
