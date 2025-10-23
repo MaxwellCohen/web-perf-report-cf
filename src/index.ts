@@ -30,9 +30,7 @@ async function fetchPageSpeedData(
     console.log(r.status);
     return { error: await r.text() };
   }
-
-  const data = await r.json();
-  return data;
+  return  r.json();
 }
 
 async function makePendingRecord({
@@ -52,13 +50,7 @@ async function makePendingRecord({
     "INSERT INTO PageSpeedInsightsTable (url, formFactor, date, data, status) VALUES (?, ?, ?, ?, ?)"
   );
   const result = await stmt
-    .bind(
-      requestUrl,
-      formFactor,
-      Date.now(),
-      JSON.stringify(data),
-      status
-    )
+    .bind(requestUrl, formFactor, Date.now(), JSON.stringify(data), status)
     .run();
   return result.meta.last_row_id;
 }
@@ -68,28 +60,32 @@ async function updateRecordWithID({
   status,
   data,
   env,
+  dataUrl,
 }: {
   id: number;
   requestUrl: string;
   formFactor: string;
   status: "pending" | "processing" | "completed" | "failed";
   data: any;
+  dataUrl: string;
   env: Env;
 }) {
-  console.log('updating', id, status, data);
+  console.log("updating", id, status, data);
   const stmt = env.DB.prepare(
-    "UPDATE PageSpeedInsightsTable SET data = ?, status = ? WHERE id = ?"
+    "UPDATE PageSpeedInsightsTable SET data = ?, status = ?, dataUrl = ? WHERE id = ?"
   );
-  const result = await stmt.bind(JSON.stringify(data), status, id).run();
+  const result = await stmt
+    .bind(JSON.stringify(data), status, dataUrl, id)
+    .run();
   return result.meta.last_row_id;
 }
 
 async function runFullReport({ url, env }: { url: string; env: Env }) {
-  console.log('hi', url);
+  console.log("hi", url);
   if (!url) {
     return Response.json({ error: "url is required" });
   }
-  console.log('hi2', url);
+  console.log("hi2", url);
   const id = await makePendingRecord({
     requestUrl: url,
     formFactor: "ALL",
@@ -97,21 +93,35 @@ async function runFullReport({ url, env }: { url: string; env: Env }) {
     data: {},
     env,
   });
-  console.log('id', id);
+  console.log("id", id);
 
   try {
-
     const [mobile, desktop] = await Promise.all([
       fetchPageSpeedData(url, "MOBILE", env),
       fetchPageSpeedData(url, "DESKTOP", env),
     ]);
-
+    const key = `results/${id}-${encodeURIComponent(url)}.json`;
+     await env.RESULTS_BUCKET.put(
+      key,
+      JSON.stringify([mobile, desktop]),
+      {
+        httpMetadata: {
+          contentType: "text/plain",
+        },
+        customMetadata: {
+          expiresAt: new Date(
+            Date.now() + 3 * 24 * 60 * 60 * 1000
+          ).toISOString(),
+        },
+      }
+    );
     await updateRecordWithID({
       id,
       requestUrl: url,
       formFactor: "ALL",
       status: "completed",
-      data: [mobile, desktop],
+      data: [],
+      dataUrl: `results/${id}-${encodeURIComponent(url)}.json`,
       env,
     });
     return true;
@@ -123,6 +133,7 @@ async function runFullReport({ url, env }: { url: string; env: Env }) {
       formFactor: "ALL",
       status: "failed",
       data: e,
+      dataUrl: "",
       env,
     });
   }
@@ -136,12 +147,19 @@ async function getExistingData({
   time: number;
   env: Env;
 }) {
-  console.log(time)
+  console.log(time);
   const existingData = await env.DB.prepare(
-    "SELECT url, status, data  FROM PageSpeedInsightsTable WHERE url = ? AND date >= ?"
+    "SELECT url, status, dataUrl  FROM PageSpeedInsightsTable WHERE url = ? AND date >= ?"
   )
     .bind(requestURL, time)
     .first();
+
+  if (typeof existingData?.dataUrl === "string" && existingData?.dataUrl) {
+    const data = await env.RESULTS_BUCKET.get(existingData.dataUrl);
+    if (data) {
+      existingData.data = await data.text();
+    }
+  }
   return existingData;
 }
 
@@ -156,25 +174,25 @@ export default {
       const time = new Date(Date.now() - 16 * 60 * 1000).getTime();
       // check database for existing date for for items in the last 16 min
       const existingData = await getExistingData({ requestURL, time, env });
-      console.log('existingData', existingData, typeof existingData);
       if (existingData) {
         return new Response(JSON.stringify(existingData), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
       }
-      if(url.searchParams.get("key") === env.PAGESPEED_INSIGHTS_API) {
-
-        console.log('running full report');
+      if (url.searchParams.get("key") === env.PAGESPEED_INSIGHTS_API) {
+        console.log("running full report");
         await runFullReport({ url: requestURL, env });
         const completedData = await getExistingData({ requestURL, time, env });
-        
+        console.log('done running the full report!');
         return new Response(JSON.stringify(completedData), {
           status: completedData ? 200 : 404,
           headers: { "Content-Type": "application/json" },
         });
       }
     }
-    return new Response("Not found", { status: 404 });
+    return new Response(JSON.stringify({ error: "Not found" }), {
+      status: 404,
+    });
   },
 } satisfies ExportedHandler<Env>;

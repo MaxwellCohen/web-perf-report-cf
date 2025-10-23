@@ -11,6 +11,7 @@ declare namespace Cloudflare {
 }
 interface Env extends Cloudflare.Env {
     PAGESPEED_INSIGHTS_API: string;
+    RESULTS_BUCKET: R2Bucket;
 }
 
 // Begin runtime types
