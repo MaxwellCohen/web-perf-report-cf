@@ -1,10 +1,6 @@
 type formFactor = "DESKTOP" | "MOBILE";
-
-function getPageSpeedDataURl(
-  testURL: string,
-  formFactor: formFactor,
-  env: Env
-) {
+import { env } from "cloudflare:workers";
+function getPageSpeedDataURl(testURL: string, formFactor: formFactor) {
   const baseurl = new URL(
     "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
   );
@@ -19,18 +15,14 @@ function getPageSpeedDataURl(
   return baseurl.toString();
 }
 
-async function fetchPageSpeedData(
-  requestUrl: string,
-  formFactor: formFactor,
-  env: Env
-) {
-  const url = getPageSpeedDataURl(requestUrl, formFactor, env);
+async function fetchPageSpeedData(requestUrl: string, formFactor: formFactor) {
+  const url = getPageSpeedDataURl(requestUrl, formFactor);
   const r = await fetch(url);
   if (!r.ok) {
     console.log(r.status);
     return { error: await r.text() };
   }
-  return  r.json();
+  return r.json();
 }
 
 async function makePendingRecord({
@@ -38,13 +30,11 @@ async function makePendingRecord({
   formFactor,
   status,
   data,
-  env,
 }: {
   requestUrl: string;
   formFactor: string;
   status: "pending" | "processing" | "completed" | "failed";
   data: any;
-  env: Env;
 }) {
   const stmt = env.DB.prepare(
     "INSERT INTO PageSpeedInsightsTable (url, formFactor, date, data, status) VALUES (?, ?, ?, ?, ?)"
@@ -59,7 +49,7 @@ async function updateRecordWithID({
   id,
   status,
   data,
-  env,
+
   dataUrl,
 }: {
   id: number;
@@ -68,7 +58,6 @@ async function updateRecordWithID({
   status: "pending" | "processing" | "completed" | "failed";
   data: any;
   dataUrl: string;
-  env: Env;
 }) {
   console.log("updating", id, status, data);
   const stmt = env.DB.prepare(
@@ -80,41 +69,33 @@ async function updateRecordWithID({
   return result.meta.last_row_id;
 }
 
-async function runFullReport({ url, env }: { url: string; env: Env }) {
-  console.log("hi", url);
+async function runFullReport({ url }: { url: string }) {
+  console.log("running full report for", url);
   if (!url) {
     return Response.json({ error: "url is required" });
   }
-  console.log("hi2", url);
   const id = await makePendingRecord({
     requestUrl: url,
     formFactor: "ALL",
     status: "pending",
     data: {},
-    env,
   });
   console.log("id", id);
 
   try {
     const [mobile, desktop] = await Promise.all([
-      fetchPageSpeedData(url, "MOBILE", env),
-      fetchPageSpeedData(url, "DESKTOP", env),
+      fetchPageSpeedData(url, "MOBILE"),
+      fetchPageSpeedData(url, "DESKTOP"),
     ]);
     const key = `results/${id}-${encodeURIComponent(url)}.json`;
-     await env.RESULTS_BUCKET.put(
-      key,
-      JSON.stringify([mobile, desktop]),
-      {
-        httpMetadata: {
-          contentType: "text/plain",
-        },
-        customMetadata: {
-          expiresAt: new Date(
-            Date.now() + 3 * 24 * 60 * 60 * 1000
-          ).toISOString(),
-        },
-      }
-    );
+    await env.RESULTS_BUCKET.put(key, JSON.stringify([mobile, desktop]), {
+      httpMetadata: {
+        contentType: "text/plain",
+      },
+      customMetadata: {
+        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    });
     await updateRecordWithID({
       id,
       requestUrl: url,
@@ -122,7 +103,6 @@ async function runFullReport({ url, env }: { url: string; env: Env }) {
       status: "completed",
       data: [],
       dataUrl: `results/${id}-${encodeURIComponent(url)}.json`,
-      env,
     });
     return true;
   } catch (e) {
@@ -134,20 +114,16 @@ async function runFullReport({ url, env }: { url: string; env: Env }) {
       status: "failed",
       data: e,
       dataUrl: "",
-      env,
     });
   }
 }
 async function getExistingData({
   requestURL,
   time,
-  env,
 }: {
   requestURL: string;
   time: number;
-  env: Env;
 }) {
-  console.log(time);
   const existingData = await env.DB.prepare(
     "SELECT url, status, dataUrl  FROM PageSpeedInsightsTable WHERE url = ? AND date >= ?"
   )
@@ -164,8 +140,9 @@ async function getExistingData({
 }
 
 export default {
-  async fetch(req: Request, env, ctx): Promise<Response> {
+  async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
+
     if (url.pathname === "/") {
       const requestURL = url.searchParams.get("url");
       if (!requestURL) {
@@ -173,7 +150,7 @@ export default {
       }
       const time = new Date(Date.now() - 16 * 60 * 1000).getTime();
       // check database for existing date for for items in the last 16 min
-      const existingData = await getExistingData({ requestURL, time, env });
+      const existingData = await getExistingData({ requestURL, time });
       if (existingData) {
         return new Response(JSON.stringify(existingData), {
           status: 200,
@@ -182,9 +159,9 @@ export default {
       }
       if (url.searchParams.get("key") === env.PAGESPEED_INSIGHTS_API) {
         console.log("running full report");
-        await runFullReport({ url: requestURL, env });
-        const completedData = await getExistingData({ requestURL, time, env });
-        console.log('done running the full report!');
+        await runFullReport({ url: requestURL });
+        const completedData = await getExistingData({ requestURL, time });
+        console.log("done running the full report!");
         return new Response(JSON.stringify(completedData), {
           status: completedData ? 200 : 404,
           headers: { "Content-Type": "application/json" },
