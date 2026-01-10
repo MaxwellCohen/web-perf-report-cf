@@ -148,7 +148,7 @@ export default {
       if (!requestURL) {
         return new Response("Missing url", { status: 400 });
       }
-      const time = new Date(Date.now() - 16 * 60 * 1000).getTime();
+      const time = new Date(Date.now() - 60 * 60 * 1000).getTime();
       // check database for existing date for for items in the last 16 min
       const existingData = await getExistingData({ requestURL, time });
       if (existingData) {
