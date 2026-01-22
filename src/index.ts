@@ -321,7 +321,7 @@ export default {
 
 
 
-export interface PageSpeedRecord {
+ interface PageSpeedRecord {
   id: number;
   url: string;
   formFactor: string;
