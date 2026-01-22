@@ -16,6 +16,10 @@ remote = true
 name = "PAGESPEED_DO"
 class_name = "PageSpeedDurableObject"
 
+[[migrations]]
+tag = "v1"
+new_classes = ["PageSpeedDurableObject"]
+
 [observability]
 enabled = true
 
