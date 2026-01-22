@@ -15,7 +15,7 @@ remote = true
 [[durable_objects.bindings]]
 name = "PAGESPEED_DO"
 class_name = "PageSpeedDurableObject"
-script_name = "web-perf-report-cf"
+script_name = "src/index.ts"
 
 [observability]
 enabled = true
