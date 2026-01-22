@@ -27,8 +27,8 @@ async function fetchPageSpeedData(requestUrl: string, formFactor: formFactor, en
 }
 
 async function getDurableObject(env: Env): Promise<DurableObjectStub> {
-  const id = env.PAGESPEED_DO.idFromName("pagespeed-storage");
-  return env.PAGESPEED_DO.get(id);
+  const id = env.PAGE_SPEED.idFromName("pagespeed-storage");
+  return env.PAGE_SPEED.get(id);
 }
 
 async function makePendingRecord({
