@@ -13,12 +13,12 @@ database_id = "0d3e24a9-f5b1-416e-bf4a-60cebe36a646"
 remote = true
 
 [[durable_objects.bindings]]
-name = "PAGESPEED_DO"
+name = "PAGE_SPEED"
 class_name = "PageSpeedDurableObject"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["PageSpeedDurableObject"]
+new_sqlite_classes = ["PageSpeedDurableObject"]
 
 [observability]
 enabled = true
