@@ -379,3 +379,18 @@ export function countRecordsByStatus(
     status
   );
 }
+
+/**
+ * Deletes records older than the specified number of days
+ * Returns the number of rows deleted
+ */
+export function deleteOldRecords(
+  sql: SqlStorage,
+  daysOld: number
+): SqlStorageCursor<never> {
+  const cutoffDate = Date.now() - daysOld * 24 * 60 * 60 * 1000;
+  return sql.exec(
+    `DELETE FROM ${TABLE_NAME} WHERE date < ?`,
+    cutoffDate
+  );
+}

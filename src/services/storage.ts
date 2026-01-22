@@ -229,3 +229,26 @@ export async function saveResultsToBucket(
 
   return key;
 }
+
+/**
+ * Deletes old records from the Durable Object
+ * Defaults to 10 days if not specified
+ */
+export async function deleteOldRecordsFromStorage(
+  daysOld: number = 10,
+  env: Env
+): Promise<{ success: boolean; deletedCount: number; daysOld: number }> {
+  const stub = await getDurableObjectStub(env);
+  const url = new URL(`https://do.internal${DURABLE_OBJECT_ROUTES.DELETE_OLD}`);
+  url.searchParams.append("days", daysOld.toString());
+
+  const response = await stub.fetch(url.toString());
+
+  if (!response.ok) {
+    const text = await response.text();
+    console.error("Durable Object deleteOld error:", response.status, text);
+    throw new Error(`Durable Object deleteOld error: ${response.status} ${text}`);
+  }
+
+  return response.json<{ success: boolean; deletedCount: number; daysOld: number }>();
+}

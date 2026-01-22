@@ -23,6 +23,7 @@ import {
   getRecordByUrlAndTime,
   listRecords,
   getNextId,
+  deleteOldRecords,
 } from "./services/sql-helpers";
 
 export class PageSpeedDurableObject extends DurableObject<Env> {
@@ -104,6 +105,8 @@ export class PageSpeedDurableObject extends DurableObject<Env> {
         return this.handleGetByPublicId(request);
       } else if (path === DURABLE_OBJECT_ROUTES.LIST) {
         return this.handleList(request);
+      } else if (path === DURABLE_OBJECT_ROUTES.DELETE_OLD) {
+        return this.handleDeleteOld(request);
       } else {
         return new Response("Not found", { status: 404 });
       }
@@ -169,7 +172,7 @@ export class PageSpeedDurableObject extends DurableObject<Env> {
   private async handleGet(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const requestURL = url.searchParams.get("url");
-    const time = parseInt(url.searchParams.get("time") || "0");
+    const time = +(url.searchParams.get("time") || "0");
 
     if (!requestURL) {
       return new Response(JSON.stringify({ error: "url parameter required" }), {
@@ -223,7 +226,7 @@ export class PageSpeedDurableObject extends DurableObject<Env> {
       });
     }
 
-    const id = parseInt(idParam);
+    const id = +(idParam);
     const cursor = getRecordById(this.ctx.storage.sql, id);
     const records = cursor.toArray();
     const record = records[0];
@@ -336,6 +339,39 @@ export class PageSpeedDurableObject extends DurableObject<Env> {
         total: allRecords.length,
         nextId,
         records: allRecords,
+      }),
+      {
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
+
+  /**
+   * Deletes records older than 10 days
+   */
+  private async handleDeleteOld(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const daysParam = url.searchParams.get("days");
+    const daysOld = daysParam ? +(daysParam) : 10;
+
+    if (isNaN(daysOld) || daysOld < 0) {
+      return new Response(
+        JSON.stringify({ error: "Invalid days parameter. Must be a positive number." }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    const cursor = deleteOldRecords(this.ctx.storage.sql, daysOld);
+    const deletedCount = cursor.rowsWritten;
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        deletedCount,
+        daysOld,
       }),
       {
         headers: { "Content-Type": "application/json" },

@@ -19,11 +19,13 @@ export const DURABLE_OBJECT_ROUTES = {
   GET_BY_ID: "/getById",
   GET_BY_PUBLIC_ID: "/getByPublicId",
   LIST: "/list",
+  DELETE_OLD: "/deleteOld",
 } as const;
 
 export const WORKER_ROUTES = {
   ROOT: "/",
   DEBUG_LIST: "/debug/list",
+  DELETE_OLD: "/delete-old",
 } as const;
 
 export const CACHE_DURATION_MS = 3_600_000; // 1 hour
