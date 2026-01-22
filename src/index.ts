@@ -1,5 +1,8 @@
 type formFactor = "DESKTOP" | "MOBILE";
 import { PageSpeedDurableObject } from "./PageSpeedDO";
+
+// Export the Durable Object class for Cloudflare Workers
+export { PageSpeedDurableObject };
 function getPageSpeedDataURl(testURL: string, formFactor: formFactor, env: Env) {
   const baseurl = new URL(
     "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
@@ -104,17 +107,18 @@ async function runFullReport({ url, env, id }: { url: string; env: Env; id?: num
     });
   }
   
-  // Update status to processing
-  await updateRecordWithID({
-    id: recordId,
-    status: "processing",
-    data: {},
-    dataUrl: "",
-    env,
-  });
   console.log("id", recordId);
 
   try {
+    // Update status to processing
+    await updateRecordWithID({
+      id: recordId,
+      status: "processing",
+      data: {},
+      dataUrl: "",
+      env,
+    });
+
     const [mobile, desktop] = await Promise.all([
       fetchPageSpeedData(url, "MOBILE", env),
       fetchPageSpeedData(url, "DESKTOP", env),
@@ -289,6 +293,3 @@ export default {
     });
   },
 } satisfies ExportedHandler<Env>;
-
-// Export the Durable Object class
-export { PageSpeedDurableObject };
