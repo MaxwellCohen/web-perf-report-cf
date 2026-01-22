@@ -123,6 +123,7 @@ async function runFullReport({ url, env, id }: { url: string; env: Env; id?: num
       fetchPageSpeedData(url, "MOBILE", env),
       fetchPageSpeedData(url, "DESKTOP", env),
     ]);
+    console.log("results", id);
     const key = `results/${recordId}-${encodeURIComponent(url)}.json`;
     await env.RESULTS_BUCKET.put(key, JSON.stringify([mobile, desktop]), {
       httpMetadata: {
@@ -132,6 +133,7 @@ async function runFullReport({ url, env, id }: { url: string; env: Env; id?: num
         expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
       },
     });
+    console.log("updating record with ID", recordId);
     await updateRecordWithID({
       id: recordId,
       status: "completed",

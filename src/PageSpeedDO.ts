@@ -1,3 +1,5 @@
+import { DurableObject } from "cloudflare:workers";
+
 export interface PageSpeedRecord {
   id: number;
   url: string;
@@ -8,16 +10,16 @@ export interface PageSpeedRecord {
   dataUrl: string;
 }
 
-export class PageSpeedDurableObject {
+export class PageSpeedDurableObject extends DurableObject<Env> {
   private state: DurableObjectState;
-  private env: Env;
   private records: Map<number, PageSpeedRecord>;
   private nextId: number;
   private initialized: Promise<void>;
 
   constructor(state: DurableObjectState, env: Env) {
+    super(state, env);
     this.state = state;
-    this.env = env;
+  
     this.records = new Map();
     this.nextId = 1;
     
