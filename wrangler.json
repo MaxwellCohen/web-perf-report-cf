@@ -16,6 +16,15 @@
 			"remote": true
 		}
 	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "PAGESPEED_DO",
+				"class_name": "PageSpeedDurableObject",
+				"script_name": "web-perf-report-cf"
+			}
+		]
+	},
 	"observability": {
 		"enabled": true
 	},
