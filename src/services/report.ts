@@ -42,13 +42,14 @@ export async function runFullReport(
   console.log("runFullReport: processing report with id", id);
 
   try {
-    // Update status to processing
+    // Update status to processing and set processingStartedAt timestamp
     await updateRecord(
       {
         id,
         status: "processing",
         data: {},
         dataUrl: "",
+        processingStartedAt: Date.now(),
       },
       env
     );

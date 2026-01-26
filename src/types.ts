@@ -30,6 +30,7 @@ export interface UpdateRecordRequest {
   status: RecordStatus;
   data: any;
   dataUrl: string;
+  processingStartedAt?: number | null;
 }
 
 export interface PageSpeedApiResponse {

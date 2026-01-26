@@ -12,6 +12,7 @@ import { DURABLE_OBJECT_ROUTES } from "./constants";
 import {
   createTable,
   addPublicIdColumn,
+  addProcessingStartedAtColumn,
   createPublicIdUniqueIndex,
   createPublicIdIndex,
   updateMissingPublicIds,
@@ -24,6 +25,8 @@ import {
   listRecords,
   getNextId,
   deleteOldRecords,
+  getStuckProcessingRecords,
+  type PageSpeedRecordRow,
 } from "./services/sql-helpers";
 
 export class PageSpeedDurableObject extends DurableObject<Env> {
@@ -54,6 +57,16 @@ export class PageSpeedDurableObject extends DurableObject<Env> {
       if (!errorMsg.includes("duplicate") && !errorMsg.includes("already exists")) {
         // If it's a different error, log it for debugging
         console.warn("Note when adding publicId column:", errorMsg);
+      }
+    }
+
+    // Try to add processingStartedAt column if it doesn't exist (for existing tables)
+    try {
+      await addProcessingStartedAtColumn(sql);
+    } catch (error: any) {
+      const errorMsg = error.message || String(error);
+      if (!errorMsg.includes("duplicate") && !errorMsg.includes("already exists")) {
+        console.warn("Note when adding processingStartedAt column:", errorMsg);
       }
     }
     
@@ -107,6 +120,8 @@ export class PageSpeedDurableObject extends DurableObject<Env> {
         return this.handleList(request);
       } else if (path === DURABLE_OBJECT_ROUTES.DELETE_OLD) {
         return this.handleDeleteOld(request);
+      } else if (path === DURABLE_OBJECT_ROUTES.GET_STUCK_PROCESSING) {
+        return this.handleGetStuckProcessing(request);
       } else {
         return new Response("Not found", { status: 404 });
       }
@@ -152,6 +167,7 @@ export class PageSpeedDurableObject extends DurableObject<Env> {
       status: body.status,
       data: JSON.stringify(body.data),
       dataUrl: body.dataUrl,
+      processingStartedAt: body.processingStartedAt,
     });
 
     if (cursor.rowsWritten === 0) {
@@ -372,6 +388,59 @@ export class PageSpeedDurableObject extends DurableObject<Env> {
         success: true,
         deletedCount,
         daysOld,
+      }),
+      {
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
+
+  /**
+   * Gets records that are stuck in processing for more than the specified duration
+   */
+  private async handleGetStuckProcessing(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const durationParam = url.searchParams.get("durationMs");
+    const maxDurationMs = durationParam ? +(durationParam) : 3 * 60 * 1000; // Default 3 minutes
+
+    if (isNaN(maxDurationMs) || maxDurationMs < 0) {
+      return new Response(
+        JSON.stringify({ error: "Invalid durationMs parameter. Must be a positive number." }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    const cursor = getStuckProcessingRecords(this.ctx.storage.sql, maxDurationMs);
+    const records = cursor.toArray();
+
+    const result = records.map((record: PageSpeedRecordRow) => {
+      // Parse JSON data
+      let parsedData: any;
+      try {
+        parsedData = JSON.parse(record.data as string);
+      } catch {
+        parsedData = record.data;
+      }
+
+      return {
+        id: record.id,
+        publicId: record.publicId,
+        url: record.url,
+        formFactor: record.formFactor,
+        date: record.date,
+        status: record.status,
+        processingStartedAt: record.processingStartedAt,
+        data: parsedData,
+      };
+    });
+
+    return new Response(
+      JSON.stringify({
+        count: result.length,
+        records: result,
       }),
       {
         headers: { "Content-Type": "application/json" },

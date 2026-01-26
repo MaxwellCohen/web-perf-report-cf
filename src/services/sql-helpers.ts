@@ -19,6 +19,7 @@ export interface PageSpeedRecordRow extends Record<string, SqlStorageValue> {
   data: string;
   status: string;
   dataUrl: string;
+  processingStartedAt: number | null;
 }
 
 export interface PageSpeedRecordInsert {
@@ -29,12 +30,14 @@ export interface PageSpeedRecordInsert {
   data: string;
   status: string;
   dataUrl: string;
+  processingStartedAt?: number | null;
 }
 
 export interface PageSpeedRecordUpdate {
   status?: string;
   data?: string;
   dataUrl?: string;
+  processingStartedAt?: number | null;
 }
 
 /**
@@ -50,7 +53,8 @@ export async function createTable(sql: SqlStorage): Promise<void> {
       date INTEGER,
       data BLOB NOT NULL,
       status TEXT CHECK (status IN ('pending', 'processing', 'completed', 'failed')) DEFAULT 'pending' NOT NULL,
-      dataUrl TEXT
+      dataUrl TEXT,
+      processingStartedAt INTEGER
     )
   `);
 }
@@ -63,6 +67,25 @@ export async function addPublicIdColumn(sql: SqlStorage): Promise<boolean> {
   try {
     await sql.exec(`
       ALTER TABLE ${TABLE_NAME} ADD COLUMN publicId TEXT
+    `);
+    return true;
+  } catch (error: any) {
+    const errorMsg = error.message || String(error);
+    if (errorMsg.includes("duplicate") || errorMsg.includes("already exists")) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Adds the processingStartedAt column to an existing table
+ * Returns true if successful, false if column already exists
+ */
+export async function addProcessingStartedAtColumn(sql: SqlStorage): Promise<boolean> {
+  try {
+    await sql.exec(`
+      ALTER TABLE ${TABLE_NAME} ADD COLUMN processingStartedAt INTEGER
     `);
     return true;
   } catch (error: any) {
@@ -100,8 +123,8 @@ export function insertRecord(
   record: PageSpeedRecordInsert
 ): SqlStorageCursor<{ id: number; publicId: string }> {
   return sql.exec<{ id: number; publicId: string }>(
-    `INSERT INTO ${TABLE_NAME} (publicId, url, formFactor, date, data, status, dataUrl) 
-     VALUES (?, ?, ?, ?, ?, ?, ?) 
+    `INSERT INTO ${TABLE_NAME} (publicId, url, formFactor, date, data, status, dataUrl, processingStartedAt) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?) 
      RETURNING id, publicId`,
     record.publicId,
     record.url,
@@ -109,7 +132,8 @@ export function insertRecord(
     record.date,
     record.data,
     record.status,
-    record.dataUrl || ""
+    record.dataUrl || "",
+    record.processingStartedAt ?? null
   );
 }
 
@@ -136,6 +160,10 @@ export function updateRecordById(
   if (updates.dataUrl !== undefined) {
     setClauses.push("dataUrl = ?");
     values.push(updates.dataUrl);
+  }
+  if (updates.processingStartedAt !== undefined) {
+    setClauses.push("processingStartedAt = ?");
+    values.push(updates.processingStartedAt);
   }
 
   if (setClauses.length === 0) {
@@ -226,7 +254,7 @@ export function getRecordById(
   id: number
 ): SqlStorageCursor<PageSpeedRecordRow> {
   return sql.exec<PageSpeedRecordRow>(
-    `SELECT id, publicId, url, formFactor, date, data, status, dataUrl 
+    `SELECT id, publicId, url, formFactor, date, data, status, dataUrl, processingStartedAt 
      FROM ${TABLE_NAME} 
      WHERE id = ?`,
     id
@@ -241,7 +269,7 @@ export function getRecordByPublicId(
   publicId: string
 ): SqlStorageCursor<PageSpeedRecordRow> {
   return sql.exec<PageSpeedRecordRow>(
-    `SELECT id, publicId, url, formFactor, date, data, status, dataUrl 
+    `SELECT id, publicId, url, formFactor, date, data, status, dataUrl, processingStartedAt 
      FROM ${TABLE_NAME} 
      WHERE publicId = ?`,
     publicId
@@ -257,7 +285,7 @@ export function getRecordByUrlAndTime(
   timeThreshold: number
 ): SqlStorageCursor<PageSpeedRecordRow> {
   return sql.exec<PageSpeedRecordRow>(
-    `SELECT id, publicId, url, formFactor, date, data, status, dataUrl 
+    `SELECT id, publicId, url, formFactor, date, data, status, dataUrl, processingStartedAt 
      FROM ${TABLE_NAME} 
      WHERE url = ? AND date >= ? 
      ORDER BY date DESC 
@@ -336,11 +364,29 @@ export function getRecordsByStatus(
   status: string
 ): SqlStorageCursor<PageSpeedRecordRow> {
   return sql.exec<PageSpeedRecordRow>(
-    `SELECT id, publicId, url, formFactor, date, data, status, dataUrl 
+    `SELECT id, publicId, url, formFactor, date, data, status, dataUrl, processingStartedAt 
      FROM ${TABLE_NAME} 
      WHERE status = ? 
      ORDER BY date DESC`,
     status
+  );
+}
+
+/**
+ * Gets records that are stuck in processing for more than the specified duration (in milliseconds)
+ */
+export function getStuckProcessingRecords(
+  sql: SqlStorage,
+  maxProcessingDurationMs: number
+): SqlStorageCursor<PageSpeedRecordRow> {
+  const cutoffTime = Date.now() - maxProcessingDurationMs;
+  return sql.exec<PageSpeedRecordRow>(
+    `SELECT id, publicId, url, formFactor, date, data, status, dataUrl, processingStartedAt 
+     FROM ${TABLE_NAME} 
+     WHERE status = 'processing' 
+       AND (processingStartedAt IS NULL OR processingStartedAt < ?)
+     ORDER BY processingStartedAt ASC`,
+    cutoffTime
   );
 }
 

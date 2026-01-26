@@ -252,3 +252,26 @@ export async function deleteOldRecordsFromStorage(
 
   return response.json<{ success: boolean; deletedCount: number; daysOld: number }>();
 }
+
+/**
+ * Gets records that are stuck in processing for more than the specified duration
+ */
+export async function getStuckProcessingRecords(
+  maxProcessingDurationMs: number,
+  env: Env
+): Promise<Array<{ id: number; publicId: string; url: string; formFactor: string; date: number; status: string; processingStartedAt: number | null; data: any }>> {
+  const stub = await getDurableObjectStub(env);
+  const url = new URL(`https://do.internal${DURABLE_OBJECT_ROUTES.GET_STUCK_PROCESSING}`);
+  url.searchParams.append("durationMs", maxProcessingDurationMs.toString());
+
+  const response = await stub.fetch(url.toString());
+
+  if (!response.ok) {
+    const text = await response.text();
+    console.error("Durable Object getStuckProcessing error:", response.status, text);
+    throw new Error(`Durable Object getStuckProcessing error: ${response.status} ${text}`);
+  }
+
+  const result = await response.json<{ count: number; records: Array<{ id: number; publicId: string; url: string; formFactor: string; date: number; status: string; processingStartedAt: number | null; data: any }> }>();
+  return result.records;
+}

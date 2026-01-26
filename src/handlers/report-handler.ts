@@ -2,9 +2,10 @@
  * Handler for report-related routes
  */
 
-import { CACHE_DURATION_MS,  } from "../constants";
+import { CACHE_DURATION_MS, } from "../constants";
 import { getRecordByUrl, createPendingRecord, getRecordById } from "../services/storage";
 import { runFullReport } from "../services/report";
+import { handleStuckRequests } from "./stuck-requests-handler";
 
 /**
  * Handles the root route for creating and retrieving reports
@@ -38,6 +39,14 @@ export async function handleReportRequest(
     existingRecord &&
     (existingRecord.status === "pending" || existingRecord.status === "processing")
   ) {
+
+    // Check for stuck requests in the background (non-blocking)
+    ctx.waitUntil(
+      handleStuckRequests(env, ctx).catch((error) => {
+        console.error("Error checking for stuck requests:", error);
+      })
+    );
+
     return new Response(JSON.stringify(existingRecord), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -49,6 +58,8 @@ export async function handleReportRequest(
   if (apiKey !== env.PAGESPEED_INSIGHTS_API) {
     return new Response("Unauthorized", { status: 401 });
   }
+
+
 
   // Create new pending record
   console.log("Creating new pending report for", requestUrl);

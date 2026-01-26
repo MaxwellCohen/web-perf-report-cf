@@ -20,6 +20,7 @@ export const DURABLE_OBJECT_ROUTES = {
   GET_BY_PUBLIC_ID: "/getByPublicId",
   LIST: "/list",
   DELETE_OLD: "/deleteOld",
+  GET_STUCK_PROCESSING: "/getStuckProcessing",
 } as const;
 
 export const WORKER_ROUTES = {
