@@ -27,6 +27,7 @@ export const WORKER_ROUTES = {
   ROOT: "/",
   DEBUG_LIST: "/debug/list",
   DELETE_OLD: "/delete-old",
+  GET_BY_PUBLIC_ID: "/get-by-id",
 } as const;
 
 export const CACHE_DURATION_MS = 3_600_000; // 1 hour

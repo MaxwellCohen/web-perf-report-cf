@@ -3,7 +3,7 @@
  * Routes requests to appropriate handlers
  */
 
-import { handleReportRequest } from "./handlers/report-handler";
+import { handleReportRequest, handleGetByPublicId } from "./handlers/report-handler";
 import { handleDebugList } from "./handlers/debug-handler";
 import { handleDeleteOldRecords } from "./handlers/delete-handler";
 import { handleStuckRequests } from "./handlers/stuck-requests-handler";
@@ -34,6 +34,10 @@ export default {
 
     if (url.pathname === WORKER_ROUTES.ROOT) {
       return handleReportRequest(request, env, ctx);
+    }
+
+    if (url.pathname === WORKER_ROUTES.GET_BY_PUBLIC_ID) {
+      return handleGetByPublicId(request, env);
     }
 
     // 404 for unknown routes

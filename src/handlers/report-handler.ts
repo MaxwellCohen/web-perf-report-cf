@@ -3,7 +3,7 @@
  */
 
 import { CACHE_DURATION_MS, } from "../constants";
-import { getRecordByUrl, createPendingRecord, getRecordById } from "../services/storage";
+import { getRecordByUrl, createPendingRecord, getRecordById, getRecordByPublicId } from "../services/storage";
 import { runFullReport } from "../services/report";
 import { handleStuckRequests } from "./stuck-requests-handler";
 
@@ -84,6 +84,38 @@ export async function handleReportRequest(
   );
 
   return new Response(JSON.stringify(pendingRecord), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/**
+ * Handles requests to get report data by publicId
+ */
+export async function handleGetByPublicId(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  const url = new URL(request.url);
+  const publicId = url.searchParams.get("id");
+
+  if (!publicId) {
+    return new Response(JSON.stringify({ error: "Missing publicId parameter" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const record = await getRecordByPublicId(publicId, env);
+
+  if (!record) {
+    return new Response(JSON.stringify({ error: "Record not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  return new Response(JSON.stringify(record), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
