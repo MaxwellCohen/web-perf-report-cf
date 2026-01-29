@@ -15,17 +15,17 @@ import {
 export async function runFullReport(
   url: string,
   env: Env,
-  recordId?: number
+  publicId?: string
 ): Promise<boolean> {
   if (!url) {
     console.error("runFullReport: url is required");
     return false;
   }
 
-  let id = recordId;
+  let recordPublicId = publicId;
 
-  // Create pending record if no ID provided
-  if (!id) {
+  // Create pending record if no publicId provided
+  if (!recordPublicId) {
     console.log("runFullReport: creating new pending record");
     const result = await createPendingRecord(
       {
@@ -36,16 +36,16 @@ export async function runFullReport(
       },
       env
     );
-    id = result.id;
+    recordPublicId = result.publicId;
   }
 
-  console.log("runFullReport: processing report with id", id);
+  console.log("runFullReport: processing report with publicId", recordPublicId);
 
   try {
     // Update status to processing and set processingStartedAt timestamp
     await updateRecord(
       {
-        id,
+        publicId: recordPublicId,
         status: "processing",
         data: {},
         dataUrl: "",
@@ -70,12 +70,18 @@ export async function runFullReport(
 
     // Save results to R2 bucket
     console.log("runFullReport: saving results to bucket");
-    const dataUrl = await saveResultsToBucket(id, url, [mobileData, desktopData], env);
+    const dataUrl = await saveResultsToBucket(
+      0,
+      url,
+      [mobileData, desktopData],
+      env,
+      recordPublicId
+    );
 
     // Update record to completed
     await updateRecord(
       {
-        id,
+        publicId: recordPublicId,
         status: "completed",
         data: [],
         dataUrl,
@@ -83,7 +89,7 @@ export async function runFullReport(
       env
     );
 
-    console.log("runFullReport: completed successfully for id", id);
+    console.log("runFullReport: completed successfully for publicId", recordPublicId);
     return true;
   } catch (error) {
     console.error("runFullReport: error occurred", error);
@@ -95,7 +101,7 @@ export async function runFullReport(
     // Update record to failed
     await updateRecord(
       {
-        id,
+        publicId: recordPublicId!,
         status: "failed",
         data: errorData,
         dataUrl: "",
@@ -103,7 +109,7 @@ export async function runFullReport(
       env
     );
 
-    console.log("runFullReport: marked as failed for id", id);
+    console.log("runFullReport: marked as failed for publicId", recordPublicId);
     return false;
   }
 }

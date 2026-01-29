@@ -28,12 +28,12 @@ export async function handleStuckRequests(env: Env, ctx: ExecutionContext): Prom
     // Rerun each stuck request
     for (const record of stuckRecords) {
       try {
-        console.log(`Rerunning stuck request: id=${record.id}, url=${record.url}`);
+        console.log(`Rerunning stuck request: publicId=${record.publicId}, url=${record.url}`);
 
         // Reset status to pending, preserve data field, and clear processingStartedAt
         await updateRecord(
           {
-            id: record.id,
+            publicId: record.publicId,
             status: "pending",
             data: record.data || {},
             dataUrl: "",
@@ -44,12 +44,12 @@ export async function handleStuckRequests(env: Env, ctx: ExecutionContext): Prom
 
         // Rerun the report in the background
         ctx.waitUntil(
-          runFullReport(record.url, env, record.id).catch((error) => {
-            console.error(`Error rerunning stuck request ${record.id}:`, error);
+          runFullReport(record.url, env, record.publicId).catch((error) => {
+            console.error(`Error rerunning stuck request ${record.publicId}:`, error);
           })
         );
       } catch (error) {
-        console.error(`Error processing stuck request ${record.id}:`, error);
+        console.error(`Error processing stuck request ${record.publicId}:`, error);
       }
     }
 

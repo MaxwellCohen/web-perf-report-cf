@@ -6,19 +6,10 @@ main = "src/index.ts"
 name = "web-perf-report-cf"
 upload_source_maps = true
 
-[[d1_databases]]
-binding = "DB"
-database_name = "web-perf-db"
-database_id = "0d3e24a9-f5b1-416e-bf4a-60cebe36a646"
-remote = true
-
-[[durable_objects.bindings]]
-name = "PAGE_SPEED"
-class_name = "PageSpeedDurableObject"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["PageSpeedDurableObject"]
+# Create with: wrangler kv namespace create KV
+[[kv_namespaces]]
+binding = "KV"
+id = "a243d4365c5542e789045e74791afdda"
 
 [observability]
 enabled = true

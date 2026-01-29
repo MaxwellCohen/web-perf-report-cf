@@ -25,8 +25,9 @@ export interface CreateRecordRequest {
 }
 
 export interface UpdateRecordRequest {
-  id: number;
-  publicId?: string;
+  /** @deprecated Use publicId. Kept for compatibility. */
+  id?: number;
+  publicId: string;
   status: RecordStatus;
   data: any;
   dataUrl: string;

@@ -4,13 +4,11 @@
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/index");
-		durableNamespaces: "PageSpeedDurableObject";
 	}
 	interface Env {
 		PAGESPEED_INSIGHTS_API: string;
-		PAGE_SPEED: DurableObjectNamespace<import("./src/index").PageSpeedDurableObject>;
+		KV: KVNamespace;
 		RESULTS_BUCKET: R2Bucket;
-		DB: D1Database;
 	}
 }
 interface Env extends Cloudflare.Env {}

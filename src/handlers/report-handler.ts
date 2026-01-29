@@ -3,7 +3,7 @@
  */
 
 import { CACHE_DURATION_MS, } from "../constants";
-import { getRecordByUrl, createPendingRecord, getRecordById, getRecordByPublicId } from "../services/storage";
+import { getRecordByUrl, createPendingRecord, getRecordByPublicId } from "../services/storage";
 import { runFullReport } from "../services/report";
 import { handleStuckRequests } from "./stuck-requests-handler";
 
@@ -63,7 +63,7 @@ export async function handleReportRequest(
 
   // Create new pending record
   console.log("Creating new pending report for", requestUrl);
-  const { id: recordId, publicId } = await createPendingRecord(
+  const { publicId } = await createPendingRecord(
     {
       requestUrl,
       formFactor: "ALL",
@@ -74,11 +74,11 @@ export async function handleReportRequest(
   );
 
   // Get the pending record to return to user
-  const pendingRecord = await getRecordById(recordId, env);
+  const pendingRecord = await getRecordByPublicId(publicId, env);
 
   // Process the report in the background
   ctx.waitUntil(
-    runFullReport(requestUrl, env, recordId).catch((error) => {
+    runFullReport(requestUrl, env, publicId).catch((error) => {
       console.error("Error processing report in background:", error);
     })
   );

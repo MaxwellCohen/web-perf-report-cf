@@ -1,5 +1,6 @@
 /**
- * Storage operations for Durable Objects and R2 bucket
+ * Storage operations using Cloudflare Workers KV
+ * Keys: record:{publicId}, url:{url} -> publicId
  */
 
 import type {
@@ -7,271 +8,307 @@ import type {
   UpdateRecordRequest,
   RecordResponse,
 } from "../types";
-import {
-  DURABLE_OBJECT_ROUTES,
-  RESULTS_BUCKET_PREFIX,
-  RESULTS_EXPIRY_DAYS,
-} from "../constants";
+import { RESULTS_BUCKET_PREFIX, RESULTS_EXPIRY_DAYS } from "../constants";
 
-/**
- * Gets the Durable Object stub for PageSpeed storage
- */
-async function getDurableObjectStub(env: Env): Promise<DurableObjectStub> {
-  const id = env.PAGE_SPEED.idFromName("pagespeed-storage");
-  return env.PAGE_SPEED.get(id);
+const KV_PREFIX_RECORD = "record:";
+const KV_PREFIX_URL = "url:";
+
+export interface StoredRecord {
+  publicId: string;
+  url: string;
+  formFactor: string;
+  date: number;
+  status: string;
+  dataUrl: string;
+  processingStartedAt: number | null;
+}
+
+function recordKey(publicId: string): string {
+  return `${KV_PREFIX_RECORD}${publicId}`;
+}
+
+function urlKey(url: string): string {
+  return `${KV_PREFIX_URL}${url}`;
 }
 
 /**
- * Creates a new pending record in the Durable Object
- * Returns both internal id and publicId
+ * Creates a new pending record in KV
+ * Returns publicId (primary key)
  */
 export async function createPendingRecord(
   request: CreateRecordRequest,
   env: Env
 ): Promise<{ id: number; publicId: string }> {
-  const stub = await getDurableObjectStub(env);
-  const response = await stub.fetch(
-    `https://do.internal${DURABLE_OBJECT_ROUTES.CREATE}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    }
-  );
+  const publicId = crypto.randomUUID();
+  const record: StoredRecord = {
+    publicId,
+    url: request.requestUrl,
+    formFactor: request.formFactor,
+    date: Date.now(),
+    status: request.status,
+    dataUrl: "",
+    processingStartedAt: null,
+  };
 
-  if (!response.ok) {
-    const text = await response.text();
-    console.error("Durable Object create error:", response.status, text);
-    throw new Error(`Durable Object create error: ${response.status} ${text}`);
-  }
+  await env.KV.put(recordKey(publicId), JSON.stringify(record));
+  await env.KV.put(urlKey(request.requestUrl), publicId);
 
-  const result = await response.json<{ id: number; publicId: string }>();
-  return result;
+  return { id: 0, publicId };
 }
 
 /**
- * Updates an existing record in the Durable Object
+ * Updates an existing record in KV (by publicId)
  */
 export async function updateRecord(
   request: UpdateRecordRequest,
   env: Env
 ): Promise<number | null> {
-  const stub = await getDurableObjectStub(env);
-  const response = await stub.fetch(
-    `https://do.internal${DURABLE_OBJECT_ROUTES.UPDATE}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
+  const existing = await env.KV.get(recordKey(request.publicId));
+  if (!existing) return null;
+
+  const record: StoredRecord = {
+    ...JSON.parse(existing),
+    status: request.status,
+    dataUrl: request.dataUrl,
+    processingStartedAt: request.processingStartedAt ?? null,
+  };
+
+  await env.KV.put(recordKey(request.publicId), JSON.stringify(record));
+  return 1;
+}
+
+async function recordToResponse(
+  record: StoredRecord,
+  env: Env
+): Promise<RecordResponse> {
+  let data: any = null;
+  if (record.dataUrl) {
+    const bucketData = await env.RESULTS_BUCKET.get(record.dataUrl);
+    if (bucketData) {
+      const text = await bucketData.text();
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = text;
+      }
     }
-  );
-
-  if (!response.ok) {
-    const text = await response.text();
-    console.error("Durable Object update error:", response.status, text);
-    throw new Error(`Durable Object update error: ${response.status} ${text}`);
   }
-
-  const result = await response.json<{ success: boolean }>();
-  return result.success ? request.id : null;
+  return {
+    publicId: record.publicId,
+    url: record.url,
+    status: record.status,
+    dataUrl: record.dataUrl,
+    data,
+  };
 }
 
 /**
- * Retrieves a record by URL and time threshold
+ * Retrieves a record by URL and time threshold (most recent for URL with date >= threshold)
  */
 export async function getRecordByUrl(
   requestUrl: string,
   timeThreshold: number,
   env: Env
 ): Promise<RecordResponse | null> {
-  const stub = await getDurableObjectStub(env);
-  const url = new URL(`https://do.internal${DURABLE_OBJECT_ROUTES.GET}`);
-  url.searchParams.append("url", requestUrl);
-  url.searchParams.append("time", timeThreshold.toString());
+  const publicId = await env.KV.get(urlKey(requestUrl));
+  if (!publicId) return null;
 
-  const response = await stub.fetch(url.toString());
+  const raw = await env.KV.get(recordKey(publicId));
+  if (!raw) return null;
 
-  if (!response.ok) {
-    const text = await response.text();
-    console.error("Durable Object get error:", response.status, text);
-    return null;
-  }
+  const record: StoredRecord = JSON.parse(raw);
+  if (record.date < timeThreshold) return null;
 
-  const record = await response.json<RecordResponse | null>();
-  if (!record) {
-    return null;
-  }
-
-  // Load data from R2 if dataUrl is present
-  if (record.dataUrl) {
-    const bucketData = await env.RESULTS_BUCKET.get(record.dataUrl);
-    if (bucketData) {
-      const text = await bucketData.text();
-      record.data = text;
-    }
-  }
-
-  return record;
+  return recordToResponse(record, env);
 }
 
 /**
- * Retrieves a record by internal ID (used internally)
- */
-export async function getRecordById(
-  id: number,
-  env: Env
-): Promise<RecordResponse | null> {
-  const stub = await getDurableObjectStub(env);
-  const url = new URL(`https://do.internal${DURABLE_OBJECT_ROUTES.GET_BY_ID}`);
-  url.searchParams.append("id", id.toString());
-
-  const response = await stub.fetch(url.toString());
-
-  if (!response.ok) {
-    const text = await response.text();
-    console.error("Durable Object getById error:", response.status, text);
-    return null;
-  }
-
-  const record = await response.json<RecordResponse | null>();
-  if (!record) {
-    return null;
-  }
-
-  // Load data from R2 if dataUrl is present
-  if (record.dataUrl) {
-    const bucketData = await env.RESULTS_BUCKET.get(record.dataUrl);
-    if (bucketData) {
-      const text = await bucketData.text();
-      record.data = text;
-    }
-  }
-
-  return record;
-}
-
-/**
- * Retrieves a record by public ID (UUID)
+ * Retrieves a record by publicId (replaces getRecordById when using publicId as primary)
  */
 export async function getRecordByPublicId(
   publicId: string,
   env: Env
 ): Promise<RecordResponse | null> {
-  const stub = await getDurableObjectStub(env);
-  const url = new URL(`https://do.internal${DURABLE_OBJECT_ROUTES.GET_BY_PUBLIC_ID}`);
-  url.searchParams.append("publicId", publicId);
+  const raw = await env.KV.get(recordKey(publicId));
+  if (!raw) return null;
 
-  const response = await stub.fetch(url.toString());
-
-  if (!response.ok) {
-    const text = await response.text();
-    console.error("Durable Object getByPublicId error:", response.status, text);
-    return null;
-  }
-
-  const record = await response.json<RecordResponse | null>();
-  if (!record) {
-    return null;
-  }
-
-  // Load data from R2 if dataUrl is present
-  if (record.dataUrl) {
-    const bucketData = await env.RESULTS_BUCKET.get(record.dataUrl);
-    if (bucketData) {
-      const text = await bucketData.text();
-      record.data = text;
-    }
-  }
-
-  return record;
+  const record: StoredRecord = JSON.parse(raw);
+  return recordToResponse(record, env);
 }
 
 /**
- * Lists all records in the Durable Object
+ * Lists all records (lists KV keys with prefix record:)
  */
-export async function listAllRecords(env: Env): Promise<any> {
-  const stub = await getDurableObjectStub(env);
-  const response = await stub.fetch(
-    `https://do.internal${DURABLE_OBJECT_ROUTES.LIST}`
-  );
+export async function listAllRecords(env: Env): Promise<{
+  total: number;
+  nextId: number;
+  records: Array<{
+    publicId: string;
+    url: string;
+    formFactor: string;
+    date: number;
+    status: string;
+    dataUrl: string;
+    hasData: boolean;
+  }>;
+}> {
+  const keys: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const list = await env.KV.list({ prefix: KV_PREFIX_RECORD, cursor, limit: 1000 });
+    keys.push(...list.keys.map((k) => k.name));
+    cursor = list.list_complete ? undefined : list.cursor;
+  } while (cursor);
 
-  if (!response.ok) {
-    const text = await response.text();
-    console.error("Durable Object list error:", response.status, text);
-    throw new Error(`Durable Object list error: ${response.status} ${text}`);
+  const records: Array<{
+    publicId: string;
+    url: string;
+    formFactor: string;
+    date: number;
+    status: string;
+    dataUrl: string;
+    hasData: boolean;
+  }> = [];
+
+  for (const key of keys) {
+    const raw = await env.KV.get(key);
+    if (!raw) continue;
+    const r: StoredRecord = JSON.parse(raw);
+    records.push({
+      publicId: r.publicId,
+      url: r.url,
+      formFactor: r.formFactor,
+      date: r.date,
+      status: r.status,
+      dataUrl: r.dataUrl,
+      hasData: !!r.dataUrl,
+    });
   }
 
-  return response.json();
+  records.sort((a, b) => b.date - a.date);
+
+  return {
+    total: records.length,
+    nextId: 1,
+    records,
+  };
 }
 
 /**
  * Saves PageSpeed results to R2 bucket
  */
 export async function saveResultsToBucket(
-  recordId: number,
+  _recordId: number,
   url: string,
   results: any[],
-  env: Env
+  env: Env,
+  publicId?: string
 ): Promise<string> {
-  const key = `${RESULTS_BUCKET_PREFIX}${recordId}-${encodeURIComponent(url)}.json`;
+  const idPart = publicId ?? _recordId;
+  const key = `${RESULTS_BUCKET_PREFIX}${idPart}-${encodeURIComponent(url)}.json`;
   const expiresAt = new Date(
     Date.now() + RESULTS_EXPIRY_DAYS * 24 * 60 * 60 * 1000
   ).toISOString();
 
   await env.RESULTS_BUCKET.put(key, JSON.stringify(results), {
-    httpMetadata: {
-      contentType: "application/json",
-    },
-    customMetadata: {
-      expiresAt,
-    },
+    httpMetadata: { contentType: "application/json" },
+    customMetadata: { expiresAt },
   });
 
   return key;
 }
 
 /**
- * Deletes old records from the Durable Object
- * Defaults to 10 days if not specified
+ * Deletes old records from KV (older than daysOld)
  */
 export async function deleteOldRecordsFromStorage(
   daysOld: number = 10,
   env: Env
 ): Promise<{ success: boolean; deletedCount: number; daysOld: number }> {
-  const stub = await getDurableObjectStub(env);
-  const url = new URL(`https://do.internal${DURABLE_OBJECT_ROUTES.DELETE_OLD}`);
-  url.searchParams.append("days", daysOld.toString());
+  const cutoff = Date.now() - daysOld * 24 * 60 * 60 * 1000;
+  const keys: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const list = await env.KV.list({ prefix: KV_PREFIX_RECORD, cursor, limit: 1000 });
+    keys.push(...list.keys.map((k) => k.name));
+    cursor = list.list_complete ? undefined : list.cursor;
+  } while (cursor);
 
-  const response = await stub.fetch(url.toString());
-
-  if (!response.ok) {
-    const text = await response.text();
-    console.error("Durable Object deleteOld error:", response.status, text);
-    throw new Error(`Durable Object deleteOld error: ${response.status} ${text}`);
+  let deletedCount = 0;
+  for (const key of keys) {
+    const raw = await env.KV.get(key);
+    if (!raw) continue;
+    const r: StoredRecord = JSON.parse(raw);
+    if (r.date < cutoff) {
+      await env.KV.delete(key);
+      const urlVal = await env.KV.get(urlKey(r.url));
+      if (urlVal === r.publicId) await env.KV.delete(urlKey(r.url));
+      deletedCount++;
+    }
   }
 
-  return response.json<{ success: boolean; deletedCount: number; daysOld: number }>();
+  return { success: true, deletedCount, daysOld };
 }
 
 /**
- * Gets records that are stuck in processing for more than the specified duration
+ * Gets records stuck in processing longer than maxProcessingDurationMs
  */
 export async function getStuckProcessingRecords(
   maxProcessingDurationMs: number,
   env: Env
-): Promise<Array<{ id: number; publicId: string; url: string; formFactor: string; date: number; status: string; processingStartedAt: number | null; data: any }>> {
-  const stub = await getDurableObjectStub(env);
-  const url = new URL(`https://do.internal${DURABLE_OBJECT_ROUTES.GET_STUCK_PROCESSING}`);
-  url.searchParams.append("durationMs", maxProcessingDurationMs.toString());
+): Promise<
+  Array<{
+    id: number;
+    publicId: string;
+    url: string;
+    formFactor: string;
+    date: number;
+    status: string;
+    processingStartedAt: number | null;
+    data: any;
+  }>
+> {
+  const cutoff = Date.now() - maxProcessingDurationMs;
+  const keys: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const list = await env.KV.list({ prefix: KV_PREFIX_RECORD, cursor, limit: 1000 });
+    keys.push(...list.keys.map((k) => k.name));
+    cursor = list.list_complete ? undefined : list.cursor;
+  } while (cursor);
 
-  const response = await stub.fetch(url.toString());
+  const out: Array<{
+    id: number;
+    publicId: string;
+    url: string;
+    formFactor: string;
+    date: number;
+    status: string;
+    processingStartedAt: number | null;
+    data: any;
+  }> = [];
 
-  if (!response.ok) {
-    const text = await response.text();
-    console.error("Durable Object getStuckProcessing error:", response.status, text);
-    throw new Error(`Durable Object getStuckProcessing error: ${response.status} ${text}`);
+  for (const key of keys) {
+    const raw = await env.KV.get(key);
+    if (!raw) continue;
+    const r: StoredRecord = JSON.parse(raw);
+    if (
+      r.status === "processing" &&
+      r.processingStartedAt != null &&
+      r.processingStartedAt < cutoff
+    ) {
+      out.push({
+        id: 0,
+        publicId: r.publicId,
+        url: r.url,
+        formFactor: r.formFactor,
+        date: r.date,
+        status: r.status,
+        processingStartedAt: r.processingStartedAt,
+        data: null,
+      });
+    }
   }
 
-  const result = await response.json<{ count: number; records: Array<{ id: number; publicId: string; url: string; formFactor: string; date: number; status: string; processingStartedAt: number | null; data: any }> }>();
-  return result.records;
+  return out;
 }

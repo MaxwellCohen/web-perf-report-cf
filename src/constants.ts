@@ -12,17 +12,6 @@ export const PAGESPEED_CATEGORIES = [
 export const PAGESPEED_API_BASE_URL =
   "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
 
-export const DURABLE_OBJECT_ROUTES = {
-  CREATE: "/create",
-  UPDATE: "/update",
-  GET: "/get",
-  GET_BY_ID: "/getById",
-  GET_BY_PUBLIC_ID: "/getByPublicId",
-  LIST: "/list",
-  DELETE_OLD: "/deleteOld",
-  GET_STUCK_PROCESSING: "/getStuckProcessing",
-} as const;
-
 export const WORKER_ROUTES = {
   ROOT: "/",
   DEBUG_LIST: "/debug/list",

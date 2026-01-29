@@ -9,9 +9,6 @@ import { handleDeleteOldRecords } from "./handlers/delete-handler";
 import { handleStuckRequests } from "./handlers/stuck-requests-handler";
 import { WORKER_ROUTES } from "./constants";
 
-// Export the Durable Object class so Wrangler can find it
-export { PageSpeedDurableObject } from "./PageSpeedDurableObject";
-
 // Re-export types for external use
 export type { PageSpeedRecord } from "./types";
 
