@@ -19,6 +19,11 @@ bucket_name = "api-results"
 binding = "RESULTS_BUCKET"
 remote = true
 
+# Delete previously deployed PageSpeedDurableObject (no longer in code)
+[[migrations]]
+tag = "v2"
+deleted_classes = ["PageSpeedDurableObject"]
+
 # Smart Placement
 # Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
 # placement = { mode = "smart" }

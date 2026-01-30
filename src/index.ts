@@ -12,6 +12,9 @@ import { WORKER_ROUTES } from "./constants";
 // Re-export types for external use
 export type { PageSpeedRecord } from "./types";
 
+// Stub so deploy passes while delete migration runs (can remove after deploy succeeds)
+export { PageSpeedDurableObject } from "./durable-object-stub";
+
 export default {
   async fetch(
     request: Request,
