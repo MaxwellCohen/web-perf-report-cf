@@ -42,12 +42,10 @@ export async function handleStuckRequests(env: Env, ctx: ExecutionContext): Prom
           env
         );
 
-        // Rerun the report in the background
-        ctx.waitUntil(
-          runFullReport(record.url, env, record.publicId).catch((error) => {
-            console.error(`Error rerunning stuck request ${record.publicId}:`, error);
-          })
-        );
+        // Rerun the report in this request so it completes (no waitUntil 30s limit)
+        await runFullReport(record.url, env, record.publicId).catch((error) => {
+          console.error(`Error rerunning stuck request ${record.publicId}:`, error);
+        });
       } catch (error) {
         console.error(`Error processing stuck request ${record.publicId}:`, error);
       }

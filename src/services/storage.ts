@@ -99,6 +99,7 @@ async function recordToResponse(
     status: record.status,
     dataUrl: record.dataUrl,
     data,
+    processingStartedAt: record.processingStartedAt ?? null,
   };
 }
 

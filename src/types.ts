@@ -45,4 +45,6 @@ export interface RecordResponse {
   status: string;
   dataUrl: string;
   data: any;
+  /** Set when status is processing; used to detect stuck requests */
+  processingStartedAt?: number | null;
 }

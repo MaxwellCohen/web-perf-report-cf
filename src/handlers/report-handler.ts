@@ -1,19 +1,23 @@
 /**
  * Handler for report-related routes
+ *
+ * Flow (no Queue, no long waitUntil):
+ * - ROOT: Create public ID and return it immediately. Report is not started here.
+ * - GET_BY_PUBLIC_ID: First call runs the full report in-request and returns the result.
  */
 
-import { CACHE_DURATION_MS, } from "../constants";
+import { CACHE_DURATION_MS } from "../constants";
 import { getRecordByUrl, createPendingRecord, getRecordByPublicId } from "../services/storage";
 import { runFullReport } from "../services/report";
-import { handleStuckRequests } from "./stuck-requests-handler";
 
 /**
- * Handles the root route for creating and retrieving reports
+ * Handles the root route for creating and retrieving reports.
+ * Creates a public ID and returns immediately; the report runs on first GET_BY_PUBLIC_ID.
  */
 export async function handleReportRequest(
   request: Request,
   env: Env,
-  ctx: ExecutionContext
+  _ctx: ExecutionContext
 ): Promise<Response> {
   const url = new URL(request.url);
   const requestUrl = url.searchParams.get("url");
@@ -34,19 +38,11 @@ export async function handleReportRequest(
     });
   }
 
-  // Return existing pending or processing record
+  // Return existing pending or processing record (client can poll GET_BY_PUBLIC_ID)
   if (
     existingRecord &&
     (existingRecord.status === "pending" || existingRecord.status === "processing")
   ) {
-
-    // Check for stuck requests in the background (non-blocking)
-    ctx.waitUntil(
-      handleStuckRequests(env, ctx).catch((error) => {
-        console.error("Error checking for stuck requests:", error);
-      })
-    );
-
     return new Response(JSON.stringify(existingRecord), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -59,9 +55,7 @@ export async function handleReportRequest(
     return new Response("Unauthorized", { status: 401 });
   }
 
-
-
-  // Create new pending record
+  // Create new pending record and return public ID immediately (no background work)
   console.log("Creating new pending report for", requestUrl);
   const { publicId } = await createPendingRecord(
     {
@@ -73,24 +67,18 @@ export async function handleReportRequest(
     env
   );
 
-  // Get the pending record to return to user
   const pendingRecord = await getRecordByPublicId(publicId, env);
-
-  // Process the report in the background
-  ctx.waitUntil(
-    runFullReport(requestUrl, env, publicId).catch((error) => {
-      console.error("Error processing report in background:", error);
-    })
-  );
-
   return new Response(JSON.stringify(pendingRecord), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
 }
 
+const STUCK_PROCESSING_THRESHOLD_MS = 3 * 60 * 1000; // 3 minutes
+
 /**
- * Handles requests to get report data by publicId
+ * Handles requests to get report data by publicId.
+ * First call for a pending (or stuck processing) id runs the full report in-request and returns the result.
  */
 export async function handleGetByPublicId(
   request: Request,
@@ -100,19 +88,30 @@ export async function handleGetByPublicId(
   const publicId = url.searchParams.get("id");
 
   if (!publicId) {
-    return new Response(JSON.stringify({ error: "Missing publicId parameter" }), {
+    return new Response(JSON.stringify({ error: "Missing id parameter" }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  const record = await getRecordByPublicId(publicId, env);
+  let record = await getRecordByPublicId(publicId, env);
 
   if (!record) {
     return new Response(JSON.stringify({ error: "Record not found" }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  const isStuck =
+    record.status === "processing" &&
+    record.processingStartedAt != null &&
+    Date.now() - record.processingStartedAt > STUCK_PROCESSING_THRESHOLD_MS;
+
+  // Run the full report in this request when pending or stuck (avoids waitUntil 30s limit)
+  if (record.status === "pending" || isStuck) {
+    await runFullReport(record.url, env, record.publicId);
+    record = (await getRecordByPublicId(publicId, env)) ?? record;
   }
 
   return new Response(JSON.stringify(record), {
